@@ -75,7 +75,7 @@ public class Main {
     }
 
     private void createBaseRepos() {
-        addRepo("forge", "net/minecraftforge");
+        addRepo("forge", "net/minecraftforge", "de/oceanlabs");
         addRepo("sponge", "org/spongepowered");
         addRepo("cpw", "cpw/mods");
     }
