@@ -1,0 +1,31 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
+}
+
+group 'me.sizableshrimp'
+version '1.0.0'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(8)
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    shade
+    implementation.extendsFrom shade
+}
+
+dependencies {
+    shade 'net.sf.jopt-simple:jopt-simple:6.0-alpha-3'
+}
+
+shadowJar {
+    archiveClassifier = 'all'
+    configurations = [project.configurations.shade]
+
+    minimize()
+}
+
+assemble.dependsOn shadowJar
