@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -18,7 +18,7 @@ public class Main {
     private final Path input;
     private final Path output;
     private final Path legacyOutputPath;
-    private final Map<Path, Path> basePathsToRepo = new HashMap<>();
+    private final Map<Path, Path> basePathsToRepo = new LinkedHashMap<>();
 
     public Main(Path input, Path output) {
         this.input = input;
@@ -75,6 +75,7 @@ public class Main {
     }
 
     private void createBaseRepos() {
+        addRepo("lex", "net/minecraftforge/lex");
         addRepo("forge", "net/minecraftforge", "de/oceanlabs");
         addRepo("sponge", "org/spongepowered");
         addRepo("cpw", "cpw/mods");
