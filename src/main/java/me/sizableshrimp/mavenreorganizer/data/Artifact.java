@@ -30,6 +30,11 @@ public record Artifact(String groupId, String artifactId, String version, boolea
         return new Artifact(groupId, artifactId, version, isSnapshot, path.getFileName().toString());
     }
 
+    public boolean isMetadata() {
+        // Includes maven-metadata.xml and any hash files
+        return file.startsWith("maven-metadata.xml");
+    }
+
     public Path getPath(Path path) {
         return path.resolve(getRelativePath());
     }

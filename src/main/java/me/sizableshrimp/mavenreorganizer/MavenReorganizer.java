@@ -45,8 +45,15 @@ public class MavenReorganizer {
             walker.filter(Files::isRegularFile).forEach(filePath -> {
                 Artifact artifact = Artifact.createFromPath(folderPath, filePath);
 
-                if (artifact != null)
+                if (artifact != null) {
+                    if (!artifact.isSnapshot() && artifact.isMetadata()) {
+                        // Reposilite is dumb and makes these invalid metadata files for release versions if queried.
+                        // So, we drop them here.
+                        // Lex's fixed version does not do that anymore so deleting them here should keep them gone for good.
+                        return;
+                    }
                     artifacts.add(artifact);
+                }
             });
         } catch (IOException e) {
             e.printStackTrace();
