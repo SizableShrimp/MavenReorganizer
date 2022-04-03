@@ -6,7 +6,7 @@ plugins {
 group 'me.sizableshrimp'
 version '1.0.0'
 
-java.toolchain.languageVersion = JavaLanguageVersion.of(8)
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 repositories {
     mavenCentral()
@@ -19,6 +19,7 @@ configurations {
 
 dependencies {
     shade 'net.sf.jopt-simple:jopt-simple:6.0-alpha-3'
+    shade 'org.apache.maven:maven-repository-metadata:3.8.5'
 }
 
 shadowJar {
