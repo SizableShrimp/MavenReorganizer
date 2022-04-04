@@ -22,6 +22,14 @@ dependencies {
     shade 'org.apache.maven:maven-repository-metadata:3.8.5'
 }
 
+jar {
+    manifest {
+        attributes([
+                'Main-Class': 'me.sizableshrimp.mavenreorganizer.Main'
+        ])
+    }
+}
+
 shadowJar {
     archiveClassifier = 'all'
     configurations = [project.configurations.shade]
