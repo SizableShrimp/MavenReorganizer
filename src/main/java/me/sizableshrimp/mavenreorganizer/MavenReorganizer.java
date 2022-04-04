@@ -2,9 +2,12 @@ package me.sizableshrimp.mavenreorganizer;
 
 import me.sizableshrimp.mavenreorganizer.data.Artifact;
 import org.apache.maven.artifact.repository.metadata.Metadata;
+import org.apache.maven.artifact.repository.metadata.Versioning;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -34,11 +37,11 @@ public class MavenReorganizer {
     }
 
     public void run() {
-        run(releases, releasesMapper, true);
-        run(proxy, proxyMapper, false);
+        run(releases, releasesMapper);
+        run(proxy, proxyMapper);
     }
 
-    private void run(Path folderPath, Map<Path, Repo> mapper, boolean useLegacy) {
+    private void run(Path folderPath, Map<Path, Repo> mapper) {
         List<Artifact> artifacts = new ArrayList<>();
 
         try (Stream<Path> walker = Files.walk(folderPath)) {
@@ -60,23 +63,22 @@ public class MavenReorganizer {
             return;
         }
 
-        // output metadata path -> metadata + whether its snapshot or release data
-        Map<Path, MetadataInfo> metadataMap = new HashMap<>();
+        // output metadata path -> metadata
+        Map<Path, Metadata> metadataMap = new HashMap<>();
 
         for (Artifact artifact : artifacts) {
-            Path outputMetadataPath = getOutputPath(mapper, artifact, true, useLegacy);
+            Path outputMetadataPath = getOutputPath(mapper, artifact, true);
             if (outputMetadataPath == null)
                 continue;
 
-            Path outputArtifactPath = getOutputPath(mapper, artifact, false, useLegacy);
+            Path outputArtifactPath = getOutputPath(mapper, artifact, false);
             if (outputArtifactPath == null)
                 continue;
 
             if (!metadataMap.containsKey(outputMetadataPath)) {
                 Path metadataPath = artifact.getMetadataPath(folderPath);
                 try {
-                    MetadataInfo metadataInfo = new MetadataInfo(MetadataIO.read(metadataPath), artifact.isSnapshot());
-                    metadataMap.put(outputMetadataPath, metadataInfo);
+                    metadataMap.put(outputMetadataPath, MetadataIO.read(metadataPath));
 
                     // maven-metadata.xml under snapshot version folders will be considered artifacts and copied to the relevant output repo
                     // They need no changes, so this works fine
@@ -94,33 +96,37 @@ public class MavenReorganizer {
             }
         }
 
-        metadataMap.forEach((outputMetadataPath, metadataInfo) -> {
-            Metadata metadata = metadataInfo.metadata;
+        metadataMap.forEach((outputMetadataPath, metadata) -> {
+            Versioning versioning = metadata.getVersioning();
+
+            // Only keep versions in the maven metadata which exist in the output folder
+            int beforeSize = versioning.getVersions().size();
+            versioning.getVersions().removeIf(version -> !Files.isDirectory(outputMetadataPath.resolveSibling(version)));
+            int afterSize = versioning.getVersions().size();
+
+            if (beforeSize != afterSize && !versioning.getVersions().contains(versioning.getRelease())) {
+                String newRelease = versioning.getVersions().stream()
+                        .filter(version -> !version.endsWith("-SNAPSHOT"))
+                        .findFirst()
+                        .orElse(null);
+                // If we removed any entries and the release version is not in the list, set it to the first non-SNAPSHOT entry in versions (or null)
+                versioning.setRelease(newRelease);
+            }
+            if (beforeSize != afterSize && !versioning.getVersions().contains(versioning.getLatest())) {
+                // If we removed any entries and the latest version is not in the list, set it to the first entry in versions
+                versioning.setRelease(versioning.getVersions().get(0));
+            }
+
+            // TODO change lastUpdated timestamp based on release/latest versions?
 
             try {
-                if (metadataInfo.isSnapshot) {
-                    // Snapshots only; clear release versions
-                    metadata.getVersioning().getVersions().removeIf(version -> !version.endsWith("-SNAPSHOT"));
-                    // Set release to null
-                    metadata.getVersioning().setRelease(null);
-                    // Set latest to the first entry in versions
-                    metadata.getVersioning().setLatest(metadata.getVersioning().getVersions().get(0));
-                } else {
-                    // Releases only; clear snapshot versions
-                    metadata.getVersioning().getVersions().removeIf(version -> version.endsWith("-SNAPSHOT"));
-                    // Set latest to release
-                    metadata.getVersioning().setLatest(metadata.getVersioning().getRelease());
-                }
-                // TODO change lastUpdated timestamp based on release/latest versions?
-
                 writeMetadata(outputMetadataPath, metadata);
+                // TODO Do we need to write out all the hash files?
             } catch (IOException e) {
                 System.err.println("Error when writing metadata to path: " + outputMetadataPath);
                 e.printStackTrace();
             }
         });
-
-        boolean b = true;
     }
 
     private void writeMetadata(Path metadataPath, Metadata metadata) throws IOException {
@@ -145,22 +151,18 @@ public class MavenReorganizer {
         Files.copy(artifact.getPath(folderPath), outputArtifactPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
     }
 
-    private Path getOutputPath(Map<Path, Repo> mapper, Artifact artifact, boolean metadata, boolean useLegacy) {
+    private Path getOutputPath(Map<Path, Repo> mapper, Artifact artifact, boolean metadata) {
         Path relativePath = artifact.getRelativePath();
 
-        for (Map.Entry<Path, Repo> entry : mapper.entrySet()) {
-            Path basePath = entry.getKey();
-            Repo repo = entry.getValue();
+        Path parent = relativePath;
+        while (parent != null) {
+            Repo repo = mapper.get(parent);
 
-            if (relativePath.startsWith(basePath)) {
+            if (repo != null) {
                 return metadata ? repo.getMetadataPath(output, artifact) : repo.getPath(output, artifact);
             }
-        }
 
-        if (useLegacy) {
-            return metadata
-                    ? Repo.LEGACY.getMetadataPath(output, artifact)
-                    : Repo.LEGACY.getPath(output, artifact);
+            parent = parent.getParent();
         }
 
         return null;
@@ -171,6 +173,10 @@ public class MavenReorganizer {
         addReleasesRepo("forge", "net/minecraftforge", "de/oceanlabs");
         addReleasesRepo("sponge", "org/spongepowered");
         addReleasesRepo("cpw", "cpw/mods");
+        String[] installerLegacy = new BufferedReader(new InputStreamReader(getClass().getResourceAsStream("/installer_artifacts.txt"))).lines()
+                .map(line -> line.substring(0, line.lastIndexOf('/')))
+                .toArray(String[]::new);
+        addReleasesRepo("legacy", installerLegacy);
 
         addProxyRepo("sponge_proxy", "org/spongepowered");
     }
@@ -183,9 +189,12 @@ public class MavenReorganizer {
         addRepo(proxyMapper, repo, basePaths);
     }
 
-    private void addRepo(Map<Path, Repo> mapper, String repo, String... basePaths) {
+    private void addRepo(Map<Path, Repo> mapper, String repoName, String... basePaths) {
+        Repo repo = Repo.create(repoName);
         for (String folder : basePaths) {
-            mapper.put(Paths.get(folder), Repo.create(repo));
+            if (mapper.put(Paths.get(folder), repo) != null) {
+                throw new IllegalStateException("Duplicate repo path of " + folder);
+            }
         }
     }
 
@@ -204,6 +213,4 @@ public class MavenReorganizer {
             return outputFolder.resolve(artifact.getMetadataPath(releases, snapshots));
         }
     }
-
-    private record MetadataInfo(Metadata metadata, boolean isSnapshot) {}
 }
