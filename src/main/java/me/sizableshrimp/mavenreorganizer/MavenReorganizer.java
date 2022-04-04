@@ -1,5 +1,7 @@
 package me.sizableshrimp.mavenreorganizer;
 
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hashing;
 import me.sizableshrimp.mavenreorganizer.data.Artifact;
 import org.apache.maven.artifact.repository.metadata.Metadata;
 import org.apache.maven.artifact.repository.metadata.Versioning;
@@ -12,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -20,6 +23,13 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 public class MavenReorganizer {
+    @SuppressWarnings("deprecation")
+    private static final Map<String, HashFunction> METADATA_HASH_FUNCTIONS = Map.of(
+            "md5", Hashing.md5(),
+            "sha1", Hashing.sha1(),
+            "sha256", Hashing.sha256(),
+            "sha512", Hashing.sha512()
+    );
     private final Path releases;
     private final Path proxy;
     private final Path output;
@@ -134,14 +144,34 @@ public class MavenReorganizer {
     private void writeMetadata(Path metadataPath, Metadata metadata) throws IOException {
         if (this.simulate) {
             System.out.println("Would have wrote metadata to path " + metadataPath);
-            return;
+        } else {
+            Path parentDir = metadataPath.getParent();
+            if (parentDir != null)
+                Files.createDirectories(parentDir);
+
+            MetadataIO.write(metadataPath, metadata);
         }
 
-        Path parentDir = metadataPath.getParent();
-        if (parentDir != null)
-            Files.createDirectories(parentDir);
+        try {
+            writeMetadataHashes(metadataPath);
+        } catch (IOException e) {
+            System.err.println("Error when writing metadata hash");
+            e.printStackTrace();
+        }
+    }
 
-        MetadataIO.write(metadataPath, metadata);
+    private void writeMetadataHashes(Path metadataPath) throws IOException {
+        byte[] metadataBytes = this.simulate ? null : Files.readAllBytes(metadataPath);
+
+        for (var entry : METADATA_HASH_FUNCTIONS.entrySet()) {
+            Path hashPath = metadataPath.resolveSibling("maven-metadata.xml." + entry.getKey());
+
+            if (this.simulate) {
+                System.out.println("Would have wrote hash file to path " + hashPath);
+            } else {
+                Files.writeString(hashPath, entry.getValue().hashBytes(metadataBytes).toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            }
+        }
     }
 
     private void copyArtifact(Path folderPath, Artifact artifact, Path outputArtifactPath) throws IOException {

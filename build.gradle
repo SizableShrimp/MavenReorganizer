@@ -20,6 +20,7 @@ configurations {
 dependencies {
     shade 'net.sf.jopt-simple:jopt-simple:6.0-alpha-3'
     shade 'org.apache.maven:maven-repository-metadata:3.8.5'
+    shade 'com.google.guava:guava:31.1-jre'
 }
 
 jar {
