@@ -99,22 +99,24 @@ public class MavenReorganizer {
         metadataMap.forEach((outputMetadataPath, metadata) -> {
             Versioning versioning = metadata.getVersioning();
 
-            // Only keep versions in the maven metadata which exist in the output folder
-            int beforeSize = versioning.getVersions().size();
-            versioning.getVersions().removeIf(version -> !Files.isDirectory(outputMetadataPath.resolveSibling(version)));
-            int afterSize = versioning.getVersions().size();
+            if (!this.simulate) {
+                // Only keep versions in the maven metadata which exist in the output folder
+                int beforeSize = versioning.getVersions().size();
+                versioning.getVersions().removeIf(version -> !Files.isDirectory(outputMetadataPath.resolveSibling(version)));
+                int afterSize = versioning.getVersions().size();
 
-            if (beforeSize != afterSize && !versioning.getVersions().contains(versioning.getRelease())) {
-                String newRelease = versioning.getVersions().stream()
-                        .filter(version -> !version.endsWith("-SNAPSHOT"))
-                        .findFirst()
-                        .orElse(null);
-                // If we removed any entries and the release version is not in the list, set it to the first non-SNAPSHOT entry in versions (or null)
-                versioning.setRelease(newRelease);
-            }
-            if (beforeSize != afterSize && !versioning.getVersions().contains(versioning.getLatest())) {
-                // If we removed any entries and the latest version is not in the list, set it to the first entry in versions
-                versioning.setRelease(versioning.getVersions().get(0));
+                if (beforeSize != afterSize && !versioning.getVersions().contains(versioning.getRelease())) {
+                    String newRelease = versioning.getVersions().stream()
+                            .filter(version -> !version.endsWith("-SNAPSHOT"))
+                            .findFirst()
+                            .orElse(null);
+                    // If we removed any entries and the release version is not in the list, set it to the first non-SNAPSHOT entry in versions (or null)
+                    versioning.setRelease(newRelease);
+                }
+                if (beforeSize != afterSize && !versioning.getVersions().contains(versioning.getLatest())) {
+                    // If we removed any entries and the latest version is not in the list, set it to the first entry in versions
+                    versioning.setLatest(versioning.getVersions().isEmpty() ? null : versioning.getVersions().get(0));
+                }
             }
 
             // TODO change lastUpdated timestamp based on release/latest versions?
@@ -144,7 +146,7 @@ public class MavenReorganizer {
 
     private void copyArtifact(Path folderPath, Artifact artifact, Path outputArtifactPath) throws IOException {
         if (this.simulate) {
-            System.out.println("Would have copied artifact " + artifact + " to output path " + outputArtifactPath);
+            System.out.println("Would have copied artifact " + artifact.getPath(folderPath) + " to output path " + outputArtifactPath);
             return;
         }
 

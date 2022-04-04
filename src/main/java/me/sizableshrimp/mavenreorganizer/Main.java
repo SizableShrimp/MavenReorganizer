@@ -38,7 +38,7 @@ public class Main {
         if (!proxy.isDirectory())
             throw new IllegalArgumentException("Proxy must be an existing directory");
 
-        if (!output.isDirectory() && !output.mkdirs())
+        if (!simulate && !output.isDirectory() && !output.mkdirs())
             throw new IllegalArgumentException("Could not make output directory with path " + output.getAbsolutePath());
 
         new MavenReorganizer(releases.toPath(), proxy.toPath(), output.toPath(), simulate).run();
