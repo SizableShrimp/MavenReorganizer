@@ -130,8 +130,10 @@ public class MavenReorganizer {
     }
 
     private void writeMetadata(Path metadataPath, Metadata metadata) throws IOException {
-        if (this.simulate)
+        if (this.simulate) {
+            System.out.println("Would have wrote metadata to path " + metadataPath);
             return;
+        }
 
         Path parentDir = metadataPath.getParent();
         if (parentDir != null)
@@ -141,8 +143,10 @@ public class MavenReorganizer {
     }
 
     private void copyArtifact(Path folderPath, Artifact artifact, Path outputArtifactPath) throws IOException {
-        if (this.simulate)
+        if (this.simulate) {
+            System.out.println("Would have copied artifact " + artifact + " to output path " + outputArtifactPath);
             return;
+        }
 
         Path parentDir = outputArtifactPath.getParent();
         if (parentDir != null)
