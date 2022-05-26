@@ -95,7 +95,7 @@ public class MavenReorganizer {
             idx++;
             if (idx / artifacts.size() * 100 >= percent + 10) {
                 percent += 10;
-                System.out.println("Processed " + percent + "% (" + idx + "/" + artifacts.size() + ")");
+                System.out.println("Processed " + percent + "% (" + (int)idx + "/" + artifacts.size() + ")");
             }
             Path outputMetadataPath = getOutputPath(mapper, artifact, true);
             if (outputMetadataPath == null) {
