@@ -20,6 +20,9 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class MavenReorganizer {
@@ -47,12 +50,19 @@ public class MavenReorganizer {
     }
 
     public void run() {
-        run(releases, releasesMapper);
-        run(proxy, proxyMapper);
+        Set<String> ur = run(releases, releasesMapper, "releases");
+        run(proxy, proxyMapper, null);
+
+        if (!ur.isEmpty()) {
+            System.out.println("Unclaimed Releases:");
+            ur.forEach(System.out::println);
+        }
     }
 
-    private void run(Path folderPath, Map<Path, Repo> mapper) {
+    private Set<String> run(Path folderPath, Map<Path, Repo> mapper, String name) {
         List<Artifact> artifacts = new ArrayList<>();
+        Set<String> unclaimed = new TreeSet<>();
+        Set<String> deleted = new TreeSet<>();
 
         try (Stream<Path> walker = Files.walk(folderPath)) {
             walker.filter(Files::isRegularFile).forEach(filePath -> {
@@ -63,27 +73,41 @@ public class MavenReorganizer {
                         // Reposilite is dumb and makes these invalid metadata files for release versions if queried.
                         // So, we drop them here.
                         // Lex's fixed version does not do that anymore so deleting them here should keep them gone for good.
+                        if (!isHash(artifact))
+                            deleted.add(artifact.getRelativePath().toString());
                         return;
                     }
                     artifacts.add(artifact);
                 }
             });
         } catch (IOException e) {
-            e.printStackTrace();
-            return;
+            sneakyThrow(e);
+            return unclaimed;
         }
 
         // output metadata path -> metadata
         Map<Path, Metadata> metadataMap = new HashMap<>();
+        System.out.println("Processing " + artifacts.size() + " aritfacts");
+        float idx = 0;
+        int percent = 0;
 
         for (Artifact artifact : artifacts) {
+            idx++;
+            if (idx / artifacts.size() * 100 >= percent + 10) {
+                percent += 10;
+                System.out.println("Processed " + percent + "% (" + idx + "/" + artifacts.size() + ")");
+            }
             Path outputMetadataPath = getOutputPath(mapper, artifact, true);
-            if (outputMetadataPath == null)
+            if (outputMetadataPath == null) {
+                unclaimed.add(artifact.groupId().replace('.', '/') + '/' + artifact.artifactId());
                 continue;
+            }
 
             Path outputArtifactPath = getOutputPath(mapper, artifact, false);
-            if (outputArtifactPath == null)
+            if (outputArtifactPath == null) {
+                unclaimed.add(artifact.groupId().replace('.', '/') + '/' + artifact.artifactId());
                 continue;
+            }
 
             if (!metadataMap.containsKey(outputMetadataPath)) {
                 Path metadataPath = artifact.getMetadataPath(folderPath);
@@ -94,7 +118,7 @@ public class MavenReorganizer {
                     // They need no changes, so this works fine
                 } catch (IOException | XmlPullParserException e) {
                     System.err.println("Error when reading metadata: " + metadataPath);
-                    e.printStackTrace();
+                    sneakyThrow(e);
                 }
             }
 
@@ -102,7 +126,7 @@ public class MavenReorganizer {
                 copyArtifact(folderPath, artifact, outputArtifactPath);
             } catch (IOException e) {
                 System.err.println("Error when copying artifact " + artifact + " to output path " + outputArtifactPath);
-                e.printStackTrace();
+                sneakyThrow(e);
             }
         }
 
@@ -136,9 +160,33 @@ public class MavenReorganizer {
                 // TODO Do we need to write out all the hash files?
             } catch (IOException e) {
                 System.err.println("Error when writing metadata to path: " + outputMetadataPath);
-                e.printStackTrace();
+                sneakyThrow(e);
             }
         });
+
+        if (!deleted.isEmpty()) {
+            Path deletedF = this.output.resolve(folderPath.getFileName() + "-deleted.txt");
+            try {
+                Files.writeString(deletedF, deleted.stream().collect(Collectors.joining("\n")));
+            } catch (IOException e) {
+                System.err.println("Error when writing deleted list: " + deletedF);
+                sneakyThrow(e);
+            }
+        }
+
+        return unclaimed;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> void sneakyThrow(Throwable e) throws E {
+        throw (E)e;
+    }
+
+    private static boolean isHash(Artifact artifact) {
+        for (String key : METADATA_HASH_FUNCTIONS.keySet())
+            if (artifact.file().endsWith('.' + key))
+                return true;
+        return false;
     }
 
     private void writeMetadata(Path metadataPath, Metadata metadata) throws IOException {
@@ -156,7 +204,7 @@ public class MavenReorganizer {
             writeMetadataHashes(metadataPath);
         } catch (IOException e) {
             System.err.println("Error when writing metadata hash");
-            e.printStackTrace();
+            sneakyThrow(e);
         }
     }
 
@@ -208,30 +256,41 @@ public class MavenReorganizer {
         addReleasesRepo("lex", "net/minecraftforge/lex");
         addReleasesRepo("forge", "net/minecraftforge", "de/oceanlabs");
         addReleasesRepo("sponge", "org/spongepowered");
+        addProxyRepo   ("sponge_proxy", "org/spongepowered");
         addReleasesRepo("cpw", "cpw/mods");
-        String[] installerLegacy = new BufferedReader(new InputStreamReader(getClass().getResourceAsStream("/installer_artifacts.txt"))).lines()
-                .map(line -> line.substring(0, line.lastIndexOf('/')))
-                .toArray(String[]::new);
-        addReleasesRepo("legacy", installerLegacy);
+        addReleasesRepo("mcmodlauncher", "org/mcmodlauncher");
+        addReleasesRepo("ldtteam", "com/ldtteam");
+        addReleasesRepo("legacy", "com/github/glitchfiend", "com/paulscode/soundsystem");
 
-        addProxyRepo("sponge_proxy", "org/spongepowered");
+        String[] installer = new BufferedReader(new InputStreamReader(getClass().getResourceAsStream("/installer_artifacts.txt"))).lines()
+            .map(line -> {
+                String[] pts = line.split(":");
+                return  pts[0].replace('.', '/') + '/' + pts[1] + '/' + pts[2];
+            })
+            .toArray(String[]::new);
+        addRepo(proxyMapper, addReleasesRepo("installer", installer), installer);
+
     }
 
-    private void addReleasesRepo(String repo, String... basePaths) {
-        addRepo(releasesMapper, repo, basePaths);
+    private Repo addReleasesRepo(String repo, String... basePaths) {
+        return addRepo(releasesMapper, repo, basePaths);
     }
 
-    private void addProxyRepo(String repo, String... basePaths) {
-        addRepo(proxyMapper, repo, basePaths);
+    private Repo addProxyRepo(String repo, String... basePaths) {
+        return addRepo(proxyMapper, repo, basePaths);
     }
 
-    private void addRepo(Map<Path, Repo> mapper, String repoName, String... basePaths) {
-        Repo repo = Repo.create(repoName);
+    private Repo addRepo(Map<Path, Repo> mapper, String repoName, String... basePaths) {
+        return addRepo(mapper, Repo.create(repoName), basePaths);
+    }
+
+    private Repo addRepo(Map<Path, Repo> mapper, Repo repo, String... basePaths) {
         for (String folder : basePaths) {
             if (mapper.put(Paths.get(folder), repo) != null) {
                 throw new IllegalStateException("Duplicate repo path of " + folder);
             }
         }
+        return repo;
     }
 
     private record Repo(Path releases, Path snapshots) {
