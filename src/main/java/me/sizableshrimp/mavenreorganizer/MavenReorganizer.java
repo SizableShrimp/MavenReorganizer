@@ -28,10 +28,10 @@ import java.util.stream.Stream;
 public class MavenReorganizer {
     @SuppressWarnings("deprecation")
     private static final Map<String, HashFunction> METADATA_HASH_FUNCTIONS = Map.of(
-            "md5", Hashing.md5(),
-            "sha1", Hashing.sha1(),
-            "sha256", Hashing.sha256(),
-            "sha512", Hashing.sha512()
+        "md5", Hashing.md5(),
+        "sha1", Hashing.sha1(),
+        "sha256", Hashing.sha256(),
+        "sha512", Hashing.sha512()
     );
     private final Path releases;
     private final Path proxy;
@@ -253,23 +253,23 @@ public class MavenReorganizer {
     }
 
     private void createBaseRepos() {
-        addReleasesRepo("lex", "net/minecraftforge/lex");
         addReleasesRepo("forge", "net/minecraftforge", "de/oceanlabs");
         addReleasesRepo("sponge", "org/spongepowered");
         addProxyRepo   ("sponge_proxy", "org/spongepowered");
-        addReleasesRepo("cpw", "cpw/mods");
+        addReleasesRepo("cpw_root", "cpw/mods"); // Can't use 'cpw' as repo name because cpw uses it as the top level..
         addReleasesRepo("mcmodlauncher", "org/mcmodlauncher");
         addReleasesRepo("ldtteam", "com/ldtteam");
-        addReleasesRepo("legacy", "com/github/glitchfiend", "com/paulscode/soundsystem");
+        addReleasesRepo("glitchfiend", "com/github/glitchfiend");
 
-        String[] installer = new BufferedReader(new InputStreamReader(getClass().getResourceAsStream("/installer_artifacts.txt"))).lines()
+        String[] installerFiles = new BufferedReader(new InputStreamReader(getClass().getResourceAsStream("/installer_artifacts.txt"))).lines()
             .map(line -> {
                 String[] pts = line.split(":");
+                if ("com.paulscode:soundsystem".equals(pts[0] + ':' + pts[1]))
+                    return "com/paulscode/soundsystem"; // We have some versions that arnt found in installers, lets keep them anyways
                 return  pts[0].replace('.', '/') + '/' + pts[1] + '/' + pts[2];
             })
             .toArray(String[]::new);
-        addRepo(proxyMapper, addReleasesRepo("installer", installer), installer);
-
+        addRepo(proxyMapper, addReleasesRepo("installer", installerFiles), installerFiles);
     }
 
     private Repo addReleasesRepo(String repo, String... basePaths) {
@@ -297,7 +297,7 @@ public class MavenReorganizer {
         static final Repo LEGACY = create("legacy");
 
         static Repo create(String repo) {
-            return new Repo(Paths.get(repo + "-releases"), Paths.get(repo + "-snapshots"));
+            return new Repo(Paths.get(repo + "/releases"), Paths.get(repo + "/snapshots"));
         }
 
         Path getPath(Path outputFolder, Artifact artifact) {
