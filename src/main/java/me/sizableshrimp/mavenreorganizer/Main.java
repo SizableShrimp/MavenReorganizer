@@ -15,6 +15,7 @@ public class Main {
         OptionSpec<File> proxyO = parser.accepts("proxy", "\"proxy\" directory that proxies other mavens").withRequiredArg().ofType(File.class).required();
         OptionSpec<File> outputO = parser.accepts("output", "Output directory to place reorganized files in").withRequiredArg().ofType(File.class).required();
         OptionSpec<Void> simulateO = parser.accepts("simulate", "When this flag is present, the program will parse all the data but not actually copy/add any files");
+        OptionSpec<Void> resumeO = parser.accepts("resume", "When this flag is present, the program will only copy files that are missing or whose hash do not match in the output directory");
 
         OptionSet options;
         try {
@@ -31,6 +32,7 @@ public class Main {
         File proxy = options.valueOf(proxyO);
         File output = options.valueOf(outputO);
         boolean simulate = options.has(simulateO);
+        boolean resume = options.has(resumeO);
 
         if (!releases.isDirectory())
             throw new IllegalArgumentException("Releases must be an existing directory");
@@ -41,6 +43,6 @@ public class Main {
         if (!simulate && !output.isDirectory() && !output.mkdirs())
             throw new IllegalArgumentException("Could not make output directory with path " + output.getAbsolutePath());
 
-        new MavenReorganizer(releases.toPath(), proxy.toPath(), output.toPath(), simulate).run();
+        new MavenReorganizer(releases.toPath(), proxy.toPath(), output.toPath(), simulate, resume).run();
     }
 }

@@ -1,5 +1,6 @@
 package me.sizableshrimp.mavenreorganizer;
 
+import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
 import me.sizableshrimp.mavenreorganizer.data.Artifact;
@@ -8,9 +9,12 @@ import org.apache.maven.artifact.repository.metadata.Versioning;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
@@ -20,6 +24,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -37,14 +42,16 @@ public class MavenReorganizer {
     private final Path proxy;
     private final Path output;
     private final boolean simulate;
+    private final boolean resume;
     private final Map<Path, Repo> releasesMapper = new LinkedHashMap<>();
     private final Map<Path, Repo> proxyMapper = new LinkedHashMap<>();
 
-    public MavenReorganizer(Path releases, Path proxy, Path output, boolean simulate) {
+    public MavenReorganizer(Path releases, Path proxy, Path output, boolean simulate, boolean resume) {
         this.releases = releases;
         this.proxy = proxy;
         this.output = output;
         this.simulate = simulate;
+        this.resume = resume;
 
         createBaseRepos();
     }
@@ -87,7 +94,7 @@ public class MavenReorganizer {
 
         // output metadata path -> metadata
         Map<Path, Metadata> metadataMap = new HashMap<>();
-        System.out.println("Processing " + artifacts.size() + " aritfacts");
+        System.out.println("Processing " + artifacts.size() + " artifacts");
         float idx = 0;
         int percent = 0;
 
@@ -164,7 +171,7 @@ public class MavenReorganizer {
             }
         });
 
-        if (!deleted.isEmpty()) {
+        if (!this.simulate && !deleted.isEmpty()) {
             Path deletedF = this.output.resolve(folderPath.getFileName() + "-deleted.txt");
             try {
                 Files.writeString(deletedF, deleted.stream().collect(Collectors.joining("\n")));
@@ -197,7 +204,18 @@ public class MavenReorganizer {
             if (parentDir != null)
                 Files.createDirectories(parentDir);
 
-            MetadataIO.write(metadataPath, metadata);
+            boolean shouldWrite = true;
+
+            if (this.resume) {
+                try (ByteArrayOutputStream tempOut = new ByteArrayOutputStream()) {
+                    MetadataIO.write(tempOut, metadata);
+                    String metadataToWrite = tempOut.toString(StandardCharsets.UTF_8);
+                    shouldWrite = shouldWrite(metadataToWrite, metadataPath);
+                }
+            }
+
+            if (shouldWrite)
+                MetadataIO.write(metadataPath, metadata);
         }
 
         try {
@@ -217,8 +235,44 @@ public class MavenReorganizer {
             if (this.simulate) {
                 System.out.println("Would have wrote hash file to path " + hashPath);
             } else {
-                Files.writeString(hashPath, entry.getValue().hashBytes(metadataBytes).toString(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                String metadataHash = entry.getValue().hashBytes(metadataBytes).toString();
+                if (!this.resume || shouldWriteHash(metadataHash, hashPath))
+                    Files.writeString(hashPath, metadataHash, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
             }
+        }
+    }
+
+    private HashCode getHash(Path path, HashFunction hashFunction) throws IOException {
+        try {
+            byte[] bytes = Files.readAllBytes(path);
+
+            return hashFunction.hashBytes(bytes);
+        } catch (NoSuchFileException e) {
+            return null;
+        }
+    }
+
+    private boolean shouldWrite(Path inputPath, Path outputPath) throws IOException {
+        HashFunction hashFunction = Hashing.md5();
+        HashCode inputHash = getHash(inputPath, hashFunction);
+        HashCode outputHash = getHash(outputPath, hashFunction);
+
+        return !Objects.equals(inputHash, outputHash);
+    }
+
+    private boolean shouldWrite(String inputData, Path outputPath) throws IOException {
+        HashFunction hashFunction = Hashing.md5();
+        HashCode inputHash = hashFunction.hashString(inputData, StandardCharsets.UTF_8);
+        HashCode outputHash = getHash(outputPath, hashFunction);
+
+        return !Objects.equals(inputHash, outputHash);
+    }
+
+    private boolean shouldWriteHash(String inputHash, Path outputHashPath) throws IOException {
+        try {
+            return !inputHash.equals(Files.readString(outputHashPath, StandardCharsets.UTF_8));
+        } catch (NoSuchFileException e) {
+            return true;
         }
     }
 
@@ -232,7 +286,11 @@ public class MavenReorganizer {
         if (parentDir != null)
             Files.createDirectories(parentDir);
 
-        Files.copy(artifact.getPath(folderPath), outputArtifactPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+        Path inputArtifactPath = artifact.getPath(folderPath);
+
+        if (!this.resume || shouldWrite(inputArtifactPath, outputArtifactPath)) {
+            Files.copy(inputArtifactPath, outputArtifactPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+        }
     }
 
     private Path getOutputPath(Map<Path, Repo> mapper, Artifact artifact, boolean metadata) {
